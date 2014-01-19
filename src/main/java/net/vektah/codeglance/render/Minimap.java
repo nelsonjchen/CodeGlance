@@ -25,6 +25,7 @@
 
 package net.vektah.codeglance.render;
 
+import com.intellij.ide.bookmarks.Bookmark;
 import com.intellij.lexer.Lexer;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.FoldRegion;
@@ -38,18 +39,23 @@ import net.vektah.codeglance.config.Config;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A rendered minimap of a document
  */
 public class Minimap {
+	private static final Composite CLEAR = AlphaComposite.getInstance(AlphaComposite.CLEAR);
+	private static final int[] unpackedColor = new int[4];
 	public BufferedImage img;
 	public int height;
 	private Logger logger = Logger.getInstance(getClass());
 	private ArrayList<Integer> line_endings;
+	private List<Bookmark> bookmarks;
 	private Config config;
-	private static final Composite CLEAR = AlphaComposite.getInstance(AlphaComposite.CLEAR);
-	private static final int[] unpackedColor = new int[4];
+	private BufferedImage scratch;
+	private static final int bookmarkHeight = 8;
+	private static final Font font = new Font(Font.SANS_SERIF, Font.PLAIN, 8);
 
 	public Minimap(Config config) {
 		this.config = config;
@@ -97,6 +103,12 @@ public class Minimap {
 
 		height = lines * config.pixelsPerLine;
 
+		for (Bookmark bookmark: bookmarks) {
+			if (bookmark.getDescription().length() > 0) {
+				height += bookmarkHeight;
+			}
+		}
+
 		// If the image is too small to represent the entire document now then regenerate it
 		// TODO: Copy old image when incremental update is added.
 		if (img == null || img.getHeight() < height || img.getWidth() < config.width) {
@@ -104,6 +116,7 @@ public class Minimap {
 			// Create an image that is a bit bigger then the one we need so we don't need to re-create it again soon.
 			// Documents can get big, so rather then relative sizes lets just add a fixed amount on.
 			img = new BufferedImage(config.width, height + 100 * config.pixelsPerLine, BufferedImage.TYPE_4BYTE_ABGR);
+			scratch = new BufferedImage(config.width, bookmarkHeight, BufferedImage.TYPE_3BYTE_BGR);
 			logger.debug("Created new image");
 		}
 	}
@@ -123,12 +136,32 @@ public class Minimap {
 		return line_endings.get(line);
 	}
 
+	public LineInfo getLine(int i) {
+		LineInfo number = getRealLine(i);
+		number.number = realLineToRenderedLine(number.number);
+		return number;
+	}
+
+	private int realLineToRenderedLine(int realLine) {
+		int line = realLine;
+
+		for (Bookmark bookmark: bookmarks) {
+			if (bookmark.getLine() < realLine) {
+				if (bookmark.getDescription().length() > 0) {
+					line += bookmarkHeight;
+				}
+			}
+		}
+
+		return line;
+	}
+
 	/**
 	 * Binary search for a line ending.
 	 * @param i character offset from start of document
 	 * @return 3 element array, [line_number, o]
 	 */
-	public LineInfo getLine(int i) {
+	private LineInfo getRealLine(int i) {
 		int lines = line_endings.get(line_endings.size() - 1);
 		if(i > lines) i = lines;
 		if(i < 0) i = 0;
@@ -207,12 +240,12 @@ public class Minimap {
 	 * @param colorScheme   The users color scheme
 	 * @param hl            The syntax highlighter to use for the language this document is in.
 	 */
-	public void update(CharSequence text, EditorColorsScheme colorScheme, SyntaxHighlighter hl, FoldRegion[] folding) {
+	public void update(CharSequence text, EditorColorsScheme colorScheme, SyntaxHighlighter hl, FoldRegion[] folding, List<Bookmark> bookmarks) {
 		logger.debug("Updating file image.");
+		this.bookmarks = bookmarks;
 		updateDimensions(text, folding);
 
 		int color;
-		int bgcolor = colorScheme.getDefaultBackground().getRGB();
 		char ch;
 		LineInfo startLine;
 		float topWeight;
@@ -243,7 +276,7 @@ public class Minimap {
 					continue;
 				}
 
-				if(text.charAt(i) == '\t') {
+				if (text.charAt(i) == '\t') {
 					x += 4;
 				} else {
 					x += 1;
@@ -262,10 +295,10 @@ public class Minimap {
 
 				ch = text.charAt(i);
 
-				if(ch == '\n') {
+				if (ch == '\n') {
 					x = 0;
 					y += config.pixelsPerLine;
-				} else if(ch == '\t') {
+				} else if (ch == '\t') {
 					x += 4;
 				} else {
 					x += 1;
@@ -273,39 +306,66 @@ public class Minimap {
 
 				topWeight = CharacterWeight.getTopWeight(text.charAt(i));
 				bottomWeight = CharacterWeight.getBottomWeight(text.charAt(i));
-
-				// No point rendering non visible characters.
-				if(topWeight == 0) continue;
-
-				if(0 <= x && x < img.getWidth() && 0 <= y && y + config.pixelsPerLine < img.getHeight()) {
-					switch(config.pixelsPerLine) {
-						case 1:
-							// Cant show whitespace between lines any more. This looks rather ugly...
-							setPixel(x,  y + 1, color, (float) ((topWeight + bottomWeight) / 2.0));
-							break;
-
-						case 2:
-							// Two lines we make the top line a little lighter to give the illusion of whitespace between lines.
-							setPixel(x, y, color, topWeight * 0.5f);
-							setPixel(x, y + 1, color, bottomWeight);
-							break;
-						case 3:
-							// Three lines we make the top nearly empty, and fade the bottom a little too
-							setPixel(x, y, color, topWeight * 0.3f);
-							setPixel(x, y + 1, color, (float) ((topWeight + bottomWeight) / 2.0));
-							setPixel(x, y + 2, color, bottomWeight * 0.7f);
-							break;
-						case 4:
-							// Empty top line, Nice blend for everything else
-							setPixel(x, y + 1, color, topWeight);
-							setPixel(x, y + 2, color, (float) ((topWeight + bottomWeight) / 2.0));
-							setPixel(x, y + 3, color, bottomWeight);
-					}
-				}
+				plotPixel(x, y, color, topWeight, bottomWeight);
 			}
 
 			lexer.advance();
 			tokenType = lexer.getTokenType();
+		}
+
+		for (Bookmark bookmark: bookmarks) {
+			if (bookmark.getDescription().length() > 0) {
+				y = (realLineToRenderedLine(bookmark.getLine() + 1) - bookmarkHeight) * config.pixelsPerLine;
+				color = colorScheme.getDefaultForeground().getRGB();
+
+				Graphics2D font = (Graphics2D) scratch.getGraphics();
+				font.clearRect(0, 0, scratch.getWidth(), scratch.getHeight());
+				font.setColor(Color.WHITE);
+				font.setFont(Minimap.font);
+				font.drawString("- " + bookmark.getDescription(), 0, (int) (bookmarkHeight * 0.9));
+				font.finalize();
+
+				for (int sy = 0; sy < scratch.getHeight(); sy++) {
+					for (int sx = 0; sx < scratch.getWidth(); sx++) {
+						if (scratch.getRGB(sx, sy) != 0xFF000000) {
+							plotPixel(2 + sx, y + sy * config.pixelsPerLine, color, 1, 1);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	private void plotPixel(int x, int y, int color, float topWeight, float bottomWeight) {
+		// No point rendering non visible characters.
+		if(topWeight == 0 && bottomWeight == 0) {
+			return;
+		}
+
+		if(0 <= x && x < img.getWidth() && 0 <= y && y + config.pixelsPerLine < img.getHeight()) {
+			switch(config.pixelsPerLine) {
+				case 1:
+					// Cant show whitespace between lines any more. This looks rather ugly...
+					setPixel(x,  y + 1, color, (float) ((topWeight + bottomWeight) / 2.0));
+					break;
+
+				case 2:
+					// Two lines we make the top line a little lighter to give the illusion of whitespace between lines.
+					setPixel(x, y, color, topWeight * 0.5f);
+					setPixel(x, y + 1, color, bottomWeight);
+					break;
+				case 3:
+					// Three lines we make the top nearly empty, and fade the bottom a little too
+					setPixel(x, y, color, topWeight * 0.3f);
+					setPixel(x, y + 1, color, (float) ((topWeight + bottomWeight) / 2.0));
+					setPixel(x, y + 2, color, bottomWeight * 0.7f);
+					break;
+				case 4:
+					// Empty top line, Nice blend for everything else
+					setPixel(x, y + 1, color, topWeight);
+					setPixel(x, y + 2, color, (float) ((topWeight + bottomWeight) / 2.0));
+					setPixel(x, y + 3, color, bottomWeight);
+			}
 		}
 	}
 
@@ -313,7 +373,6 @@ public class Minimap {
 	 * mask out the alpha component and set it to the given value.
 	 * @param color         Color A
 	 * @param alpha     alpha percent from 0-1.
-	 * @return int color
 	 */
 	private void setPixel(int x, int y, int color, float alpha) {
 		if(alpha > 1) alpha = color;
@@ -329,14 +388,13 @@ public class Minimap {
 	}
 
 	public class LineInfo {
+		public int number;
+		public int begin;
+		public int end;
 		LineInfo(int number, int begin, int end) {
 			this.number = number;
 			this.begin = begin;
 			this.end = end;
 		}
-
-		public int number;
-		public int begin;
-		public int end;
 	}
 }

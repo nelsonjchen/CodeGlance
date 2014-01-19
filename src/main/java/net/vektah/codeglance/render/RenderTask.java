@@ -25,9 +25,11 @@
 
 package net.vektah.codeglance.render;
 
+import com.intellij.ide.bookmarks.Bookmark;
 import com.intellij.openapi.editor.FoldRegion;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.fileTypes.SyntaxHighlighter;
+import java.util.List;
 
 public class RenderTask implements Runnable {
 	private Minimap minimap;
@@ -36,18 +38,20 @@ public class RenderTask implements Runnable {
 	private SyntaxHighlighter hl;
 	private final Runnable then;
 	private FoldRegion[] folding;
+	private List<Bookmark> bookmarks;
 
-	public RenderTask(Minimap minimap, CharSequence text, EditorColorsScheme cs, SyntaxHighlighter hl, FoldRegion[] folding, Runnable then) {
+	public RenderTask(Minimap minimap, CharSequence text, EditorColorsScheme cs, SyntaxHighlighter hl, FoldRegion[] folding, List<Bookmark> bookmarks, Runnable then) {
 		this.minimap = minimap;
 		this.text = text;
 		this.cs = cs;
 		this.hl = hl;
 		this.then = then;
 		this.folding = folding;
+		this.bookmarks = bookmarks;
 	}
 
 	@Override public void run() {
-		minimap.update(text, cs, hl, folding);
+		minimap.update(text, cs, hl, folding, bookmarks);
 		then.run();
 	}
 }

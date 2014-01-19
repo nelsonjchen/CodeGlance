@@ -25,6 +25,7 @@
 
 package net.vektah.codeglance;
 
+import com.intellij.ide.bookmarks.BookmarkManager;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -179,7 +180,7 @@ public class GlancePanel extends JPanel implements VisibleAreaListener {
 
 		nextBuffer = activeBuffer == 0 ? 1 : 0;
 
-		runner.add(new RenderTask(minimaps[nextBuffer], editor.getDocument().getText(), editor.getColorsScheme(), hl, editor.getFoldingModel().getAllFoldRegions(), new Runnable() {
+		runner.add(new RenderTask(minimaps[nextBuffer], editor.getDocument().getText(), editor.getColorsScheme(), hl, editor.getFoldingModel().getAllFoldRegions(), BookmarkManager.getInstance(project).getValidBookmarks(), new Runnable() {
 			@Override public void run() {
 				updateComplete();
 			}
